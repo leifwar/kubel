@@ -73,6 +73,9 @@
 ;;; Code:
 
 (require 'transient)
+(require 'helm)
+(require 'kubel-cust)
+(require 'kubel-helm)
 
 (defconst kubel--list-format
   [("Name" 50 t)
@@ -96,9 +99,10 @@
 
 (defvar kubel-namespace ""
   "Current namespace.")
+
 (defvar kubel-context
   (replace-regexp-in-string
-   "\n" "" (shell-command-to-string "kubectl config current-context"))
+   "\n" "" (shell-command-to-string (concat kubel-executable " config current-context")))
   "Current context.  Tries to smart default.")
 
 (defvar kubel-pod-filter ""
@@ -174,8 +178,8 @@ ARGS is a ist of arguments."
   (when (get-buffer buffer-name)
     (kill-buffer buffer-name))
   (if async
-      (apply #'start-process buffer-name buffer-name "kubectl" (append (kubel--get-context-namespace) args))
-    (apply #'call-process "kubectl" nil buffer-name nil (append (kubel--get-context-namespace) args)))
+      (apply #'start-process buffer-name buffer-name kubel-executable (append (kubel--get-context-namespace) args))
+    (apply #'call-process kubel-executable nil buffer-name nil (append (kubel--get-context-namespace) args)))
   (pop-to-buffer buffer-name))
 
 (defun kubel--get-pod-under-cursor ()
@@ -192,7 +196,7 @@ ARGS is a ist of arguments."
 
 (defun kubel--get-command-prefix ()
   "Utility function to prefix the kubectl command with proper context and namespace."
-  (mapconcat 'identity (append '("kubectl") (kubel--get-context-namespace)) " "))
+  (mapconcat 'identity (append (list kubel-executable) (kubel--get-context-namespace)) " "))
 
 (defun kubel--get-containers (pod-name)
   "List the containers in a pod.
@@ -330,13 +334,15 @@ ARGS is the arguments list from transient."
 (defun kubel-set-namespace ()
   "Set the namespace."
   (interactive)
-  (let ((namespace (completing-read "Namespace: " kubel-namespace-history)))
-    (when (get-buffer (kubel--buffer-name))
-      (kill-buffer (kubel--buffer-name)))
-    (setq kubel-namespace namespace)
-    (unless (member namespace kubel-namespace-history)
-      (push namespace kubel-namespace-history))
-    (kubel)))
+  (let ((namespace (kubel-get-available-namespaces)))
+    (if namespace
+        (progn
+          (when (get-buffer (kubel--buffer-name))
+            (kill-buffer (kubel--buffer-name)))
+          (setq kubel-namespace namespace)
+          (kubel)))
+    )
+  )
 
 (defun kubel-set-context ()
   "Set the context."
@@ -346,7 +352,8 @@ ARGS is the arguments list from transient."
   (setq kubel-context
         (completing-read
          "Select context: "
-         (split-string (shell-command-to-string "kubectl config view -o jsonpath='{.contexts[*].name}'") " ")))
+         (split-string (shell-command-to-string
+                        (concat kubel-executable " config view -o jsonpath='{.contexts[*].name}'")) " ")))
   (kubel))
 
 (defun kubel-port-forward-pod (p)
@@ -571,7 +578,7 @@ FILTER is the filter string."
   (interactive)
   (kubel--pop-to-buffer (kubel--buffer-name))
   (kubel-mode)
-  (message (concat "Namespace: " kubel-namespace)))
+  )
 
 (define-derived-mode kubel-mode tabulated-list-mode "Kubel"
   "Special mode for kubel buffers."
